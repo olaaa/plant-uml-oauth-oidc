@@ -1,0 +1,109 @@
+@startuml
+skinparam backgroundColor #F8F9FA
+skinparam ParticipantPadding 30
+skinparam BoxPadding 15
+skinparam sequenceArrowThickness 3
+skinparam sequenceMessageAlign center
+
+skinparam Participant {
+  BackgroundColor #E3F2FD
+  BorderColor #1976D2
+  FontColor #0D47A1
+}
+skinparam Actor {
+  BackgroundColor #FFECB3
+  BorderColor #FFA000
+  FontColor #EF6C00
+}
+skinparam Note {
+  BackgroundColor #FFF3E0
+  BorderColor #FF9800
+  FontColor #E65100
+}
+
+actor "Владелец ресурсов\n(Пользователь)" as Owner
+participant "Клиент\n(Кинокасса)" as App
+participant "Сервер авторизации\n(Keycloak)" as Auth
+participant "Сервер ресурсов\n(Календарь)" as Resource
+
+== 1. Владелец ресурсов хочет добавить событие ==
+
+Owner -> App: 1. Добавить событие в календарь
+
+== 2–6. Авторизация владельца ресурсов ==
+
+App -> Owner: 2. Перенаправление на /authorize\n(302 Redirect)
+
+note over App, Auth
+  GET /authorize?
+    client_id={идентификатор_клиента_из_Keycloak}
+    &response_type=code
+    &redirect_uri={https://your-app/callback}
+    &scope={calendar calendar.create}
+    &code_challenge={Base64URL(SHA256(code_verifier))}
+    &code_challenge_method=S256
+    &state={случайная_строка_для_защиты_от_CSRF}
+end note
+
+Owner -> Auth: 3. GET /authorize\n(запрос страницы авторизации)
+
+note over Owner, Auth
+Важно: Владелец ресурсов НЕ знает и НЕ видит client_id!
+client_id подставляет сам Клиент (Кинокасса).
+Это идентификатор приложения, который разработчик получил
+при регистрации клиента в Keycloak.
+Владелец ресурсов видит только название приложения
+и список запрошенных прав на экране согласия.
+end note
+
+Auth --> Owner: 4. Страница авторизации\n(форма логина + согласие)
+
+note over Owner
+  Экран согласия:
+  "Приложение 'Кинокасса' хочет получить доступ к ресурсам:
+  - Календарь (добавление событий)"
+  [Да] [Нет]
+end note
+
+Owner -> Auth: 5. Подтверждение доступа\n(логин + "Да")
+
+Auth -> App: 6. 302 Redirect обратно\n{https://your-app/callback?code={одноразовый_код_авторизации}&state={та_же_строка_что_выше}}
+
+== 7–9. Обмен кода на токены ==
+
+App -> Auth: 7. POST /token\n(обмен кода на токены)
+
+note over App, Auth
+  Параметры POST /token:
+    grant_type=authorization_code
+    code={одноразовый_код_авторизации_из_шага_6}
+    redirect_uri={https://your-app/callback}
+    client_id={идентификатор_клиента_из_Keycloak}
+    code_verifier={оригинальная_случайная_строка_которую_сгенерировал_клиент_в_начале}
+
+  **Отличие в зависимости от типа клиента**:
+  - Конфиденциальный клиент: сюда добавляется client_secret={секрет_клиента} (аутентификация клиента). PKCE рекомендуется.
+  - Публичный клиент: client_secret НЕ передаётся (его нет). PKCE ОБЯЗАТЕЛЕН, иначе ошибка.
+  Сервер проверяет PKCE + client_secret (если есть).
+end note
+
+Auth --> App: 8–9. 200 OK\nВозвращает токены (см. note ниже)
+
+note over Auth, App
+  Ответ (JSON):
+  {
+    "access_token": {JWT или opaque токен доступа},
+    "refresh_token": {длинная случайная строка для обновления},
+    "expires_in": {3600},
+    "token_type": "Bearer",
+    "id_token": {JWT с информацией о пользователе при OIDC}
+  }
+end note
+
+== 10. Использование токена ==
+
+App -> Resource: 10. Добавить событие\nAuthorization: Bearer {access_token_из_шага_9}
+
+Resource --> App: 200 OK (событие добавлено)
+
+@enduml
