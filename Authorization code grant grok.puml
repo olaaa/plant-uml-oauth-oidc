@@ -21,6 +21,8 @@ skinparam Note {
   FontColor #E65100
 }
 
+title Предоставление полномочий по коду доступа / Authorization code grant
+
 actor "Владелец ресурсов\n(Пользователь)" as Owner
 participant "Клиент\n(Кинокасса)" as App
 participant "Сервер авторизации\n(Keycloak)" as Auth
@@ -31,11 +33,17 @@ participant "Сервер ресурсов\n(Календарь)" as Resource
 Owner -> App: 1. Добавить событие в календарь
 
 == 2–6. Авторизация владельца ресурсов ==
+note over App, Owner
+  Перенаправляет в браузере пользователя
+  на страницу авторизации на стороне сервера авторизации
+end note
 
-App -> Owner: 2. Перенаправление на /authorize\n(302 Redirect)
+App -> Owner: 2. Перенаправление на \n[[http://localhost:8080/realms/eselpo/protocol/openid-connect/auth]] \nЗапрос кода доступа\n(302 Redirect)
 
 note over App, Auth
-  GET /authorize?
+Сначала пользователь аутентифицируется на стороне сервера авторизации.
+Затем выполняется авторизация клиента.
+  GET /auth?
     client_id={идентификатор_клиента_из_Keycloak}
     &response_type=code
     &redirect_uri={https://your-app/callback}
@@ -45,7 +53,7 @@ note over App, Auth
     &state={случайная_строка_для_защиты_от_CSRF}
 end note
 
-Owner -> Auth: 3. GET /authorize\n(запрос страницы авторизации)
+Owner -> Auth: 3. GET /auth\n(запрос страницы авторизации)
 
 note over Owner, Auth
 Важно: Владелец ресурсов НЕ знает и НЕ видит client_id!
@@ -58,7 +66,7 @@ end note
 
 Auth --> Owner: 4. Страница авторизации\n(форма логина + согласие)
 
-note over Owner
+note right Owner
   Экран согласия:
   "Приложение 'Кинокасса' хочет получить доступ к ресурсам:
   - Календарь (добавление событий)"
@@ -67,11 +75,17 @@ end note
 
 Owner -> Auth: 5. Подтверждение доступа\n(логин + "Да")
 
-Auth -> App: 6. 302 Redirect обратно\n{https://your-app/callback?code={одноразовый_код_авторизации}&state={та_же_строка_что_выше}}
+note left Auth
+После того, как пользователь предоставил права на стороне сервера авторизации,
+создаётся код авторизации и сохраняются данные авторизации (например code_challenge?),
+которые в дальнейшем будут проверяться.
+end note
+
+Auth -> Owner: 6. Код возвращается клиенту\n302 Redirect в браузер в клиентское приложение\n https://your-app/callback?code={одноразовый_код_авторизации}&state={та_же_строка_что_выше}
 
 == 7–9. Обмен кода на токены ==
 
-App -> Auth: 7. POST /token\n(обмен кода на токены)
+App -> Auth: 7. POST /token\n(обмен код доступа на токены)
 
 note over App, Auth
   Параметры POST /token:
