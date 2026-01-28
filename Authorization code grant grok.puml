@@ -85,7 +85,7 @@ Auth -> Owner: 6. Код возвращается клиенту\n302 Redirect �
 
 == 7–9. Обмен кода на токены ==
 
-App -> Auth: 7. POST /token\n(обмен код доступа на токены)
+App -> Auth: 7. POST [[http://localhost:8080/realms/eselpo/protocol/openid-connect/token]]\n(обмен код доступа на токены)
 
 note over App, Auth
   Параметры POST /token:
