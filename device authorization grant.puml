@@ -1,0 +1,91 @@
+@startuml
+skinparam backgroundColor #F8F9FA
+skinparam ParticipantPadding 30
+skinparam BoxPadding 15
+skinparam sequenceArrowThickness 3
+skinparam sequenceMessageAlign center
+
+skinparam Participant {
+  BackgroundColor #E3F2FD
+  BorderColor #1976D2
+  FontColor #0D47A1
+}
+skinparam Actor {
+  BackgroundColor #FFECB3
+  BorderColor #FFA000
+  FontColor #EF6C00
+}
+skinparam Note {
+  BackgroundColor #FFF3E0
+  BorderColor #FF9800
+  FontColor #E65100
+}
+
+actor "Пользователь\n(с телефоном/ПК)" as User
+participant "Устройство\n(Клиент)" as Device
+participant "Сервер авторизации\n(Keycloak)" as Auth
+participant "Браузер пользователя" as Browser
+
+== 1. Устройство запрашивает коды ==
+
+Device -> Auth: POST /auth/device\nclient_id=my-smart-tv\nscope=openid profile
+
+Auth --> Device: 200 OK\n{\n  "device_code": "GmRhmh...dLh2k8",\n  "user_code": "ABCD-EFGH",\n  "verification_uri": "https://auth.example.com/device",\n  "verification_uri_complete": "https://auth.example.com/device?user_code=ABCD-EFGH",\n  "expires_in": 600,\n  "interval": 5\n}
+
+note over Device
+  Устройство сохраняет device_code (секретно)
+  и начинает polling каждые 5 секунд
+end note
+
+== 2. Устройство показывает инструкцию пользователю ==
+
+Device --> User: На экране устройства:\n"Перейдите на https://auth.example.com/device\nи введите код: ABCD-EFGH"
+
+note over Device, User
+  Лучший UX: QR-код с verification_uri_complete
+  (пользователь сканирует → сразу открывается страница с кодом)
+end note
+
+== 3. Пользователь открывает браузер ==
+
+User -> Browser: Открывает https://auth.example.com/device
+
+Browser -> Auth: GET /device\n(показывает форму ввода user_code)
+
+User -> Browser: Вводит user_code: ABCD-EFGH
+
+Browser -> Auth: POST /device\nuser_code=ABCD-EFGH
+
+Auth --> Browser: Страница логина
+
+User -> Browser: Логин + пароль + 2FA (если нужно)
+
+Auth --> Browser: Экран согласия:\n"Smart TV хочет доступ к вашему календарю?"
+
+User -> Browser: Нажимает "Разрешить"
+
+Auth --> Browser: "Успешно! Можете закрыть вкладку"
+
+== 4. Polling: устройство проверяет статус ==
+
+loop Каждые 5 секунд (interval)
+  Device -> Auth: POST /token\ngrant_type=urn:ietf:params:oauth:grant-type:device_code\n&device_code=GmRhmh...dLh2k8\n&client_id=my-smart-tv
+
+  alt Пока пользователь не подтвердил
+    Auth --> Device: {"error": "authorization_pending"}
+  else Пользователь подтвердил
+    Auth --> Device: 200 OK\n{\n  "access_token": "eyJhbGciOiJSUzI1NiIs...",\n  "refresh_token": "...",\n  "id_token": "...",\n  "expires_in": 3600,\n  "token_type": "Bearer"\n}
+    break
+  else Слишком частый polling
+    Auth --> Device: {"error": "slow_down"}
+    note over Device: Увеличиваю интервал на 5 секунд
+  end
+end
+
+== 5. Устройство использует токен ==
+
+Device -> ResourceServer: Запрос API\nAuthorization: Bearer {access_token}
+
+ResourceServer --> Device: 200 OK (действие выполнено)
+
+@enduml
